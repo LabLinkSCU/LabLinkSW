@@ -1,5 +1,7 @@
-# Middleware Installed
+# LabLink Software
+
+## Middleware Installed
 * FreeRTOS
 
-# Depedencies
+## Depedencies
 * Cube L4 FW 1.18.1
