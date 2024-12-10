@@ -30,6 +30,7 @@
 #include "event_groups.h"
 #include <stdio.h>
 #include <string.h>
+#include "LabLinkConf.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,20 +57,28 @@ QSPI_HandleTypeDef hqspi;
 
 SPI_HandleTypeDef hspi3;
 
+TIM_HandleTypeDef htim7;
+
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
-PCD_HandleTypeDef hpcd_USB_OTG_FS;
-
 /* Definitions for defaultTask */
-osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
+//osThreadId_t defaultTaskHandle;
+//const osThreadAttr_t defaultTask_attributes = {
+//  .name = "defaultTask",
+//  .stack_size = 128 * 4,
+//  .priority = (osPriority_t) osPriorityNormal,
+//};
 /* USER CODE BEGIN PV */
+// General
+volatile State_t SW_State = INIT_SEARCH; // State machine state
+QueueHandle_t xQueue; // Queue for hands :D
+// CLIENT
+TaskHandle_t SETUP_Handle, USR_BTN_Handle, LED_BLINK_Handle, PING_Handle;
+SemaphoreHandle_t xBinarySemaphore;
 
+// HOST
+/* @TODO */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -81,16 +90,30 @@ static void MX_QUADSPI_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
-static void MX_USB_OTG_FS_PCD_Init(void);
+static void MX_TIM7_Init(void);
 void StartDefaultTask(void *argument);
+void EXTI15_10_IRQHandler(void);
 
 /* USER CODE BEGIN PFP */
-
+void USR_BTN(void);
+void LED_BLINK(void);
+void PING(void);
+void SYS_Setup(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int _write(int file, char *ptr, int len) {
 
+ for (int i = 0; i < len; i++) {
+
+ ITM_SendChar((*ptr++));
+
+ }
+
+ return len;
+
+}
 /* USER CODE END 0 */
 
 /**
@@ -101,7 +124,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -128,19 +150,20 @@ int main(void)
   MX_SPI3_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-  MX_USB_OTG_FS_PCD_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
   /* USER CODE END 2 */
 
   /* Init scheduler */
-  osKernelInitialize();
+//  osKernelInitialize();
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
+  xBinarySemaphore = xSemaphoreCreateBinary();
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
@@ -150,14 +173,30 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  xQueue = xQueueCreate(MAX_USERS, sizeof(Hand));
+  if(xQueue == NULL)
+  {
+	  Error_Handler();
+  }
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+//  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+//  BaseType_t xReturned;
+//  xReturned = xTaskCreate(SYS_Setup, "SYS_Setup", 256, NULL, PRIORITY_HIGH+1, &SETUP_Handle);
+//  if (xReturned != pdPASS)
+//      vTaskDelete(SETUP_Handle);
+//
+//  xReturned = xTaskCreate(USR_BTN, "USR_BTN", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
+//    if (xReturned != pdPASS)
+//          vTaskDelete(USR_BTN_Handle);
+
+//  xReturned = xTaskCreate(LED_BLINK, "LED_BLINK", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
+//  xReturned = xTaskCreate(PING, "PING", 256, NULL, PRIORITY_LOW, &USR_BTN_Handle);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -165,12 +204,13 @@ int main(void)
   /* USER CODE END RTOS_EVENTS */
 
   /* Start scheduler */
-  osKernelStart();
+//  osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+//  vTaskStartScheduler();
   while (1)
   {
     /* USER CODE END WHILE */
@@ -294,7 +334,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x00000E14;
+  hi2c2.Init.Timing = 0x10D19CE4;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -400,6 +440,44 @@ static void MX_SPI3_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 6159;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 64934;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -470,41 +548,6 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
-
-  /* USER CODE END USB_OTG_FS_Init 0 */
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
-
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
-  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
-  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
-  hpcd_USB_OTG_FS.Init.Sof_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.battery_charging_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = DISABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
-
-  /* USER CODE END USB_OTG_FS_Init 2 */
-
-}
-
-/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -560,11 +603,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BUTTON_EXTI13_Pin */
-  GPIO_InitStruct.Pin = BUTTON_EXTI13_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  /*Configure GPIO pins : BUTTON_EXTI13_Pin VL53L0X_GPIO1_EXTI7_Pin LSM3MDL_DRDY_EXTI8_Pin */
+  GPIO_InitStruct.Pin = BUTTON_EXTI13_Pin|VL53L0X_GPIO1_EXTI7_Pin|LSM3MDL_DRDY_EXTI8_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BUTTON_EXTI13_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : ARD_A5_Pin ARD_A4_Pin ARD_A3_Pin ARD_A2_Pin
                            ARD_A1_Pin ARD_A0_Pin */
@@ -654,11 +697,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : VL53L0X_GPIO1_EXTI7_Pin LSM3MDL_DRDY_EXTI8_Pin */
-  GPIO_InitStruct.Pin = VL53L0X_GPIO1_EXTI7_Pin|LSM3MDL_DRDY_EXTI8_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pin : USB_OTG_FS_VBUS_Pin */
+  GPIO_InitStruct.Pin = USB_OTG_FS_VBUS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(USB_OTG_FS_VBUS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : USB_OTG_FS_ID_Pin USB_OTG_FS_DM_Pin USB_OTG_FS_DP_Pin */
+  GPIO_InitStruct.Pin = USB_OTG_FS_ID_Pin|USB_OTG_FS_DM_Pin|USB_OTG_FS_DP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PMOD_SPI2_SCK_Pin */
   GPIO_InitStruct.Pin = PMOD_SPI2_SCK_Pin;
@@ -696,7 +747,64 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	if(GPIO_Pin == GPIO_PIN_13)
+	{
+		HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+//		printf("HELLO");
+//		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+//		xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
+//		xTaskNotifyFromISR(USR_BTN, 0x01, eSetBits, &xHigherPriorityTaskWoken);
+//		portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+	}
+}
 
+void SYS_Setup()
+{
+	for(;;)
+	{
+		if(SW_State == INIT_SEARCH)
+		{
+			printf("System Startup\n");
+			HAL_TIM_Base_Start_IT(&htim7);
+			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+			vTaskDelay(pdMS_TO_TICKS(2000));
+			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+			vTaskDelete(SETUP_Handle);
+		}
+	}
+
+}
+
+void USR_BTN()
+{
+	uint32_t notifiedValue;
+	BaseType_t xWaitResult;
+	for(;;)
+	{
+		xSemaphoreTake(xBinarySemaphore, portMAX_DELAY);
+//		xWaitResult = xTaskNotifyWait(0, 0, &notifiedValue, portMAX_DELAY);
+//		if(xWaitResult == pdTRUE)
+		printf("Hello world! %x\n", notifiedValue);
+	}
+}
+
+void LED_BLINK()
+{
+	for(;;)
+		{
+			printf("LED BLINK!\n");
+		}
+}
+
+void PING()
+{
+	for(;;)
+		{
+			printf("PING!\n");
+		}
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -709,11 +817,11 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+//  /* Infinite loop */
+//  for(;;)
+//  {
+//    osDelay(1);
+//  }
   /* USER CODE END 5 */
 }
 
@@ -734,7 +842,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if(htim->Instance == TIM7)
+  {
+	  printf("Test");
+  }
   /* USER CODE END Callback 1 */
 }
 
