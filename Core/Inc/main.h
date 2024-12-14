@@ -31,7 +31,37 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stm32l4xx_hal.h"
+#include "stm32l475e_iot01.h"
+#include "stm32l4xx_hal_iwdg.h"
+#include "stm32l475e_iot01_accelero.h"
+#include "stm32l475e_iot01_psensor.h"
+#include "stm32l475e_iot01_gyro.h"
+#include "stm32l475e_iot01_hsensor.h"
+#include "stm32l475e_iot01_tsensor.h"
+#include "stm32l475e_iot01_magneto.h"
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include "es_wifi.h"
+#include "wifi.h"
 
+#define INTERNAL_TEMPSENSOR_V30 ((int32_t)760) /*
+Internal temperature sensor, parameter V25 (unit: mV). Refer to device
+datasheet for min/typ/max values. */
+#define INTERNAL_TEMPSENSOR_AVGSLOPE ((int32_t)2500) /*
+Internal temperature sensor, parameter Avg_Slope (unit: uV/DegCelsius).
+Refer to device datasheet for min/typ/max values. */
+#define TEMP30_CAL_ADDR ((uint16_t*) ((uint32_t)0x1FFF75A8)) /*
+Internal temperature sensor, parameter TS_CAL1: TS ADC raw data
+acquired at a temperature of 30 DegC (+-5 DegC) */
+#define TEMP110_CAL_ADDR ((uint16_t*) ((uint32_t)0x1FFF75CA)) /*
+Internal temperature sensor, parameter TS_CAL2: TS ADC raw data
+acquired at a temperature of 110 DegC (+-5 DegC) */
+#define VDDA_TEMP_CAL ((uint32_t)3000) /* Vdda
+value with which temperature sensor has been calibrated in production
+(+-10 mV). */
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -46,13 +76,21 @@ extern "C" {
 
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
+#define COMPUTATION_TEMPERATURE_TEMP30_TEMP110(TS_ADC_DATA)                    \
+  (((( ((int32_t)((TS_ADC_DATA * VDDA_APPLI) / VDDA_TEMP_CAL)                  \
+        - (int32_t) *TEMP30_CAL_ADDR)                                          \
+     ) * (int32_t)(110 - 30)                                                   \
+    ) / (int32_t)(*TEMP110_CAL_ADDR - *TEMP30_CAL_ADDR)                        \
+   ) + 30                                                                      \
+  )
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+extern  SPI_HandleTypeDef hspi;
+void SPI3_IRQHandler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -221,6 +259,7 @@ void Error_Handler(void);
 #define ISM43362_SPI3_CSN_GPIO_Port GPIOE
 #define ISM43362_DRDY_EXTI1_Pin GPIO_PIN_1
 #define ISM43362_DRDY_EXTI1_GPIO_Port GPIOE
+#define ISM43362_DRDY_EXTI1_EXTI_IRQn EXTI1_IRQn
 
 /* USER CODE BEGIN Private defines */
 

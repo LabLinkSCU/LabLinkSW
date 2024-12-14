@@ -49,8 +49,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
-
 I2C_HandleTypeDef hi2c2;
 
 QSPI_HandleTypeDef hqspi;
@@ -70,12 +68,16 @@ UART_HandleTypeDef huart3;
 //  .priority = (osPriority_t) osPriorityNormal,
 //};
 /* USER CODE BEGIN PV */
+//WiFi
+static uint8_t http[1024];
+static uint8_t IP_Addr[4];
+static int LedState = 0;
 // General
-volatile State_t SW_State = INIT_SEARCH; // State machine state
+volatile State_t SW_State = WEBSERVER; // State machine state
 QueueHandle_t xQueue; // Queue for hands :D
-// CLIENT
-TaskHandle_t SETUP_Handle, USR_BTN_Handle, LED_BLINK_Handle, PING_Handle;
-SemaphoreHandle_t xBinarySemaphore;
+//// CLIENT
+TaskHandle_t SETUP_Handle, USR_BTN_Handle, MainTask_Handle;
+SemaphoreHandle_t xSemaphore;
 
 // HOST
 /* @TODO */
@@ -84,25 +86,51 @@ SemaphoreHandle_t xBinarySemaphore;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DFSDM1_Init(void);
 static void MX_I2C2_Init(void);
-static void MX_QUADSPI_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_USART1_UART_Init(void);
-static void MX_USART3_UART_Init(void);
 static void MX_TIM7_Init(void);
+static void MX_QUADSPI_Init(void);
+static void MX_USART3_UART_Init(void);
 void StartDefaultTask(void *argument);
-void EXTI15_10_IRQHandler(void);
 
 /* USER CODE BEGIN PFP */
-void USR_BTN(void);
-void LED_BLINK(void);
-void PING(void);
-void SYS_Setup(void);
+void USR_BTN(void *argument);
+void LED_BLINK(void *argument);
+void PING(void *argument);
+void SYS_Setup(void *argument);
+
+#if defined (TERMINAL_USE)
+#ifdef __GNUC__
+/* With GCC, small printf (option LD Linker->Libraries->Small printf
+set to 'Yes') calls __io_putchar() */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+#endif /* TERMINAL_USE */
+static WIFI_Status_t SendWebPage(char* nextStation);
+static int wifi_server(void);
+static int wifi_start(void);
+static int wifi_connect(void);
+static bool WebServerProcess(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#define SSID ""
+#define PASSWORD ""
+#define PORT 80
+#define TERMINAL_USE
+#define WIFI_WRITE_TIMEOUT 10000
+#define WIFI_READ_TIMEOUT 10000
+#define SOCKET 0
+#ifdef TERMINAL_USE
+#define LOG(a) printf a
+#else
+#define LOG(a)
+#endif
+
 int _write(int file, char *ptr, int len) {
 
  for (int i = 0; i < len; i++) {
@@ -144,15 +172,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DFSDM1_Init();
   MX_I2C2_Init();
-  MX_QUADSPI_Init();
   MX_SPI3_Init();
   MX_USART1_UART_Init();
-  MX_USART3_UART_Init();
   MX_TIM7_Init();
+  MX_QUADSPI_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+//  HAL_TIM_Base_Start_IT(&htim7);
+//  BSP_TSENSOR_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -163,7 +191,7 @@ int main(void)
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-  xBinarySemaphore = xSemaphoreCreateBinary();
+  xSemaphore = xSemaphoreCreateBinary();
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
@@ -173,11 +201,11 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  xQueue = xQueueCreate(MAX_USERS, sizeof(Hand));
-  if(xQueue == NULL)
-  {
-	  Error_Handler();
-  }
+  xQueue = xQueueCreate(MAX_USERS, sizeof(int));
+//  if(xQueue == NULL)
+//  {
+//	  Error_Handler();
+//  }
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -186,17 +214,17 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-//  BaseType_t xReturned;
-//  xReturned = xTaskCreate(SYS_Setup, "SYS_Setup", 256, NULL, PRIORITY_HIGH+1, &SETUP_Handle);
-//  if (xReturned != pdPASS)
-//      vTaskDelete(SETUP_Handle);
-//
-//  xReturned = xTaskCreate(USR_BTN, "USR_BTN", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
-//    if (xReturned != pdPASS)
-//          vTaskDelete(USR_BTN_Handle);
+  BaseType_t xReturned;
+  xReturned = xTaskCreate(USR_BTN, "USR_BTN", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
+    if (xReturned != pdPASS)
+          vTaskDelete(USR_BTN_Handle);
+
+  xReturned = xTaskCreate(StartDefaultTask, "Main Task", 1024, NULL, PRIORITY_LOW, &MainTask_Handle);
+  if (xReturned != pdPASS)
+          vTaskDelete(MainTask_Handle);
 
 //  xReturned = xTaskCreate(LED_BLINK, "LED_BLINK", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
-//  xReturned = xTaskCreate(PING, "PING", 256, NULL, PRIORITY_LOW, &USR_BTN_Handle);
+
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -210,7 +238,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-//  vTaskStartScheduler();
+  vTaskStartScheduler();
   while (1)
   {
     /* USER CODE END WHILE */
@@ -278,44 +306,6 @@ void SystemClock_Config(void)
   /** Enable MSI Auto calibration
   */
   HAL_RCCEx_EnableMSIPLLMode();
-}
-
-/**
-  * @brief DFSDM1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_DFSDM1_Init(void)
-{
-
-  /* USER CODE BEGIN DFSDM1_Init 0 */
-
-  /* USER CODE END DFSDM1_Init 0 */
-
-  /* USER CODE BEGIN DFSDM1_Init 1 */
-
-  /* USER CODE END DFSDM1_Init 1 */
-  hdfsdm1_channel1.Instance = DFSDM1_Channel1;
-  hdfsdm1_channel1.Init.OutputClock.Activation = ENABLE;
-  hdfsdm1_channel1.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
-  hdfsdm1_channel1.Init.OutputClock.Divider = 2;
-  hdfsdm1_channel1.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
-  hdfsdm1_channel1.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
-  hdfsdm1_channel1.Init.Input.Pins = DFSDM_CHANNEL_FOLLOWING_CHANNEL_PINS;
-  hdfsdm1_channel1.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
-  hdfsdm1_channel1.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_INTERNAL;
-  hdfsdm1_channel1.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
-  hdfsdm1_channel1.Init.Awd.Oversampling = 1;
-  hdfsdm1_channel1.Init.Offset = 0;
-  hdfsdm1_channel1.Init.RightBitShift = 0x00;
-  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN DFSDM1_Init 2 */
-
-  /* USER CODE END DFSDM1_Init 2 */
-
 }
 
 /**
@@ -457,9 +447,9 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 6159;
+  htim7.Init.Prescaler = 36639;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 64934;
+  htim7.Init.Period = 65501;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -561,6 +551,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -675,6 +666,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : DFSDM1_DATIN2_Pin DFSDM1_CKOUT_Pin */
+  GPIO_InitStruct.Pin = DFSDM1_DATIN2_Pin|DFSDM1_CKOUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
   /*Configure GPIO pins : LPS22HB_INT_DRDY_EXTI0_Pin LSM6DSL_INT1_EXTI11_Pin ARD_D2_Pin HTS221_DRDY_EXTI15_Pin
                            PMOD_IRQ_EXTI12_Pin */
   GPIO_InitStruct.Pin = LPS22HB_INT_DRDY_EXTI0_Pin|LSM6DSL_INT1_EXTI11_Pin|ARD_D2_Pin|HTS221_DRDY_EXTI15_Pin
@@ -736,6 +735,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
@@ -747,63 +749,358 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+
+void getNextStation(xQueueHandle xQueue, char *output)
 {
-	if(GPIO_Pin == GPIO_PIN_13)
-	{
-		HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-//		printf("HELLO");
-//		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-//		xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
-//		xTaskNotifyFromISR(USR_BTN, 0x01, eSetBits, &xHigherPriorityTaskWoken);
-//		portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+	int item;
+	char tmpStr[64];
+	if(xQueuePeek(xQueue, &item, 0) == pdPASS)
+	{ // Queue has an item
+		snprintf(tmpStr, sizeof(tmpStr), "Station #%d", item);
+		strcpy(output, tmpStr);
+	} else {
+      // Queue is empty
+		strcpy(output, "Queue Empty");
 	}
+	printf("%s", tmpStr);
 }
 
-void SYS_Setup()
+
+static int wifi_start(void)
+{
+	LOG(("WIFI START\n"));
+  uint8_t  MAC_Addr[6];
+
+ /*Initialize and use WIFI module */
+  if(WIFI_Init() ==  WIFI_STATUS_OK)
+  {
+    LOG(("ES-WIFI Initialized.\n"));
+    if(WIFI_GetMAC_Address(MAC_Addr, sizeof(MAC_Addr)) == WIFI_STATUS_OK)
+    {
+      LOG(("> eS-WiFi module MAC Address : %02X:%02X:%02X:%02X:%02X:%02X\n",
+               MAC_Addr[0],
+               MAC_Addr[1],
+               MAC_Addr[2],
+               MAC_Addr[3],
+               MAC_Addr[4],
+               MAC_Addr[5]));
+    }
+    else
+    {
+      LOG(("> ERROR : CANNOT get MAC address\n"));
+      return -1;
+    }
+  }
+  else
+  {
+    return -1;
+  }
+  return 0;
+}
+
+int wifi_connect(void)
+{
+
+  wifi_start();
+
+  LOG(("\nConnecting to %s , %s\n",SSID,PASSWORD));
+  if( WIFI_Connect(SSID, PASSWORD, WIFI_ECN_WPA2_PSK) == WIFI_STATUS_OK)
+  {
+    if(WIFI_GetIP_Address(IP_Addr, sizeof(IP_Addr)) == WIFI_STATUS_OK)
+    {
+      LOG(("> es-wifi module connected: got IP Address : %d.%d.%d.%d\n",
+               IP_Addr[0],
+               IP_Addr[1],
+               IP_Addr[2],
+               IP_Addr[3]));
+    }
+    else
+    {
+		  LOG((" ERROR : es-wifi module CANNOT get IP address\n"));
+      return -1;
+    }
+  }
+  else
+  {
+		 LOG(("ERROR : es-wifi module NOT connected\n"));
+     return -1;
+  }
+  return 0;
+}
+
+int wifi_server(void)
+{
+  bool StopServer = false;
+
+  LOG(("\nRunning HTML Server test\n"));
+  if (wifi_connect()!=0) return -1;
+
+
+  if (WIFI_STATUS_OK!=WIFI_StartServer(SOCKET, WIFI_TCP_PROTOCOL, 1, "", PORT))
+  {
+    LOG(("ERROR: Cannot start server.\n"));
+  }
+
+  LOG(("Server is running and waiting for an HTTP  Client connection to %d.%d.%d.%d\n",IP_Addr[0],IP_Addr[1],IP_Addr[2],IP_Addr[3]));
+
+  do
+  {
+    uint8_t RemoteIP[4];
+    uint16_t RemotePort;
+
+
+    while (WIFI_STATUS_OK != WIFI_WaitServerConnection(SOCKET,1000,RemoteIP,sizeof(RemoteIP), &RemotePort))
+    {
+        LOG(("Waiting communication at %d.%d.%d.%d\n",IP_Addr[0],IP_Addr[1],IP_Addr[2],IP_Addr[3]));
+
+    }
+
+    LOG(("Client connected %d.%d.%d.%d:%d\n",RemoteIP[0],RemoteIP[1],RemoteIP[2],RemoteIP[3],RemotePort));
+
+    StopServer=WebServerProcess();
+
+
+    if(WIFI_CloseServerConnection(SOCKET) != WIFI_STATUS_OK)
+    {
+      LOG(("ERROR: failed to close current Server connection\n"));
+      return -1;
+    }
+  }
+  while(StopServer == false);
+
+  if (WIFI_STATUS_OK!=WIFI_StopServer(SOCKET))
+  {
+    LOG(("ERROR: Cannot stop server.\n"));
+  }
+
+  LOG(("Server is stop\n"));
+  return 0;
+}
+
+static bool WebServerProcess(void)
+{
+  uint16_t  respLen;
+  static   uint8_t resp[1024];
+  bool    stopserver=false;
+
+  if (WIFI_STATUS_OK == WIFI_ReceiveData(SOCKET, resp, 1000, &respLen, WIFI_READ_TIMEOUT))
+  {
+   LOG(("get %d byte from server\n",respLen));
+
+   if( respLen > 0)
+   {
+	  char next_station[64];
+	  getNextStation(xQueue, next_station);
+      if(strstr((char *)resp, "GET")) /* GET: put web page */
+      {
+    	  printf("%s", resp);
+    	  LOG(("GET REQUEST\n"));
+
+    	  if(strstr((char *)resp, "stationNumber"))
+    	  {
+    		  char ss[20];
+    		  strncpy(ss, resp + 30, 1);
+    		  ss[1] = '\0';
+    		  printf("Station #: %s\n", ss);
+    		  int stationID = atoi(ss);
+    		  if(xQueueSend(xQueue, &stationID, 10) != pdPASS)
+    		  {
+    			  printf("Failed to add to queue. Queue full..\n");
+    		  }
+    	  }
+//        temp = (int) BSP_TSENSOR_ReadTemp();
+//        humidity = BSP_HSENSOR_ReadHumidity();
+        if(SendWebPage(next_station) != WIFI_STATUS_OK)
+        {
+          LOG(("> ERROR : Cannot send web page\n"));
+        }
+        else
+        {
+          LOG(("Send page after  GET command\n"));
+        }
+       }
+       else if(strstr((char *)resp, "POST"))/* POST: received info */
+       {
+         LOG(("Post request\n"));
+
+         if(SendWebPage(next_station) != WIFI_STATUS_OK)
+         {
+           LOG(("> ERROR : Cannot send web page\n"));
+         }
+         else
+         {
+           LOG(("Send Page after POST command\n"));
+         }
+       }
+     }
+  }
+  else
+  {
+    LOG(("Client close connection\n"));
+  }
+  return stopserver;
+
+ }
+
+static WIFI_Status_t SendWebPage(char* nextStation)
+{
+  uint16_t SentDataLength;
+//  char* nextSt[64];
+  WIFI_Status_t ret;
+
+  /* construct web page content */
+  strcpy((char *)http, (char *)"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nPragma: no-cache\r\n\r\n");
+  strcat((char *)http, (char *)"<html>\r\n<body>\r\n");
+  strcat((char *)http, (char *)"<title>SCU LabLink</title>\r\n");
+  strcat((char *)http, (char *)"<h2>Lab Link - Lab Assistant</h2>\r\n");
+  strcat((char *)http, (char *)"<br /><hr>\r\n");
+
+  // Create the form with a script to send the station number as part of the URL
+  strcat((char *)http, (char *)"<h3>Next Group</h3>\r\n");
+  strcat((char *)http, (char *)"<p>");
+  strcat((char *)http, (char *)nextStation);
+  strcat((char *)http, (char *)"</p>\r\n");
+
+  strcat((char *)http, (char *)"<h3>Ask for Help</h3>\r\n");
+  strcat((char *)http, (char *)"<form id=\"helpForm\">\r\n"); // Removed action and method
+  strcat((char *)http, (char *)"<strong>Lab Station #: <input id=\"stationNumber\" name=\"stationNumber\" type=\"number\" value=\"\">\r\n"); // Keep name for JS
+  strcat((char *)http, (char *)"</strong></p>\r\n");
+  strcat((char *)http, (char *)"<p><button type=\"button\" onclick=\"submitForm()\">Raise Hand</button></p>\r\n"); // Use JavaScript to submit
+  strcat((char *)http, (char *)"</form>\r\n");
+
+  // Add JavaScript for handling form submission and sending the station number in the URL
+  strcat((char *)http, (char *)"<script>\r\n");
+  strcat((char *)http, (char *)"function submitForm() {\r\n");
+  strcat((char *)http, (char *)"  var number = document.getElementById('stationNumber').value;\r\n");
+  strcat((char *)http, (char *)"  if (!number || isNaN(number)) {\r\n"); // Check if input is empty or not a number
+  strcat((char *)http, (char *)"    alert('Please enter a valid station number.');\r\n");
+  strcat((char *)http, (char *)"    return;\r\n"); // Don't proceed if invalid
+  strcat((char *)http, (char *)"  }\r\n");
+
+  strcat((char *)http, (char *)"  var xhr = new XMLHttpRequest();\r\n");
+  strcat((char *)http, (char *)"  var url = '/raise-hand?stationNumber=' + encodeURIComponent(number);\r\n"); // Build URL with station number
+  strcat((char *)http, (char *)"  xhr.open('GET', url, true);\r\n"); // Use GET method to send the data
+  strcat((char *)http, (char *)"  xhr.onreadystatechange = function() {\r\n");
+  strcat((char *)http, (char *)"    if (xhr.readyState == 4 && xhr.status == 200) {\r\n");
+  strcat((char *)http, (char *)"      alert('Hand raised successfully!');\r\n");
+  strcat((char *)http, (char *)"    }\r\n");
+  strcat((char *)http, (char *)"  };\r\n");
+
+  strcat((char *)http, (char *)"  xhr.send(); // Send GET request with station number in URL\r\n"); // Send the GET request
+  strcat((char *)http, (char *)"}\r\n");
+  strcat((char *)http, (char *)"</script>\r\n");
+
+  strcat((char *)http, (char *)"</body>\r\n</html>\r\n");
+
+
+
+
+
+  LOG(("Webpage Sent!\n"));
+
+  ret = WIFI_SendData(0, (uint8_t *)http, strlen((char *)http), &SentDataLength, WIFI_WRITE_TIMEOUT);
+
+  if((ret == WIFI_STATUS_OK) && (SentDataLength != strlen((char *)http)))
+  {
+    ret = WIFI_STATUS_ERROR;
+  }
+
+  return ret;
+}
+
+//void SYS_Setup()
+//{
+//	for(;;)
+//	{
+//		if(SW_State == INIT_SEARCH)
+//		{
+//			printf("System Startup\n");
+//			HAL_TIM_Base_Start_IT(&htim7);
+//			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+//			vTaskDelay(pdMS_TO_TICKS(2000));
+//			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+//			vTaskDelete(SETUP_Handle);
+//		}
+//	}
+//
+//}
+
+void USR_BTN(void *argument)
 {
 	for(;;)
 	{
-		if(SW_State == INIT_SEARCH)
+//		xTaskNotifyWait(0, 0, &notificationValue, portMAX_DELAY);
+//		if(notificationValue > 0)
+//		{
+		if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE)
 		{
-			printf("System Startup\n");
-			HAL_TIM_Base_Start_IT(&htim7);
-			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-			vTaskDelay(pdMS_TO_TICKS(2000));
-			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-			vTaskDelete(SETUP_Handle);
+			int data;
+			xQueueReceive(xQueue, &data, 20);
+//			printf("Hello world! %x\n", ulNotifiedValue);
+
 		}
 	}
-
 }
 
-void USR_BTN()
-{
-	uint32_t notifiedValue;
-	BaseType_t xWaitResult;
-	for(;;)
-	{
-		xSemaphoreTake(xBinarySemaphore, portMAX_DELAY);
-//		xWaitResult = xTaskNotifyWait(0, 0, &notifiedValue, portMAX_DELAY);
-//		if(xWaitResult == pdTRUE)
-		printf("Hello world! %x\n", notifiedValue);
-	}
-}
-
-void LED_BLINK()
+void LED_BLINK(void *argument)
 {
 	for(;;)
 		{
-			printf("LED BLINK!\n");
+			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+			vTaskDelay(pdMS_TO_TICKS(500));
 		}
 }
 
-void PING()
+void PING(void *argument)
 {
 	for(;;)
 		{
 			printf("PING!\n");
 		}
+}
+
+void SPI3_IRQHandler(void)
+{
+  HAL_SPI_IRQHandler(&hspi);
+}
+
+//void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+//{
+//	if(GPIO_Pin == GPIO_PIN_13)
+//	{
+//		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+//		xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
+//
+//		// If giving the semaphore wakes a task with higher priority, perform a context switch
+//		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+//	}
+//
+//
+//}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  switch (GPIO_Pin)
+  {
+    case (GPIO_PIN_1):
+    {
+      SPI_WIFI_ISR();
+      break;
+    }
+    case (GPIO_PIN_13):
+	{
+//    	printf("USER BUTTON!\n");
+      BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+      xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
+      // If giving the semaphore wakes a task with higher priority, perform a context switch
+      portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	  break;
+	}
+    default:
+    {
+      break;
+    }
+  }
 }
 /* USER CODE END 4 */
 
@@ -817,11 +1114,25 @@ void PING()
 void StartDefaultTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-//  /* Infinite loop */
-//  for(;;)
-//  {
-//    osDelay(1);
-//  }
+  /* Infinite loop */
+  for(;;)
+  {
+//	  State_t Next_State;
+//	  switch(SW_State)
+//	  {
+//	  case WEBSERVER:
+		  LOG(("Starting WiFi Server Task"));
+		  wifi_server();
+		  vTaskDelay(pdMS_TO_TICKS(1000));
+//		  break;
+//	  default:
+//		  break;
+//      if(Next_State != SW_State)
+//      {
+//	    SW_State = Next_State;
+//	  }
+//	 }
+  }
   /* USER CODE END 5 */
 }
 

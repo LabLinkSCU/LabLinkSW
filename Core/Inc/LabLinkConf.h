@@ -3,12 +3,7 @@
 
 // States for State Machine
 typedef enum SM_States {
-		INIT_SEARCH = 0,
-		HOST_SETUP,
-		HOST_NORMAL_OP,
-		CLIENT_PAIR,
-		CLIENT_STANDBY,
-		CLIENT_NORMAL_OP,
+	WEBSERVER = 0,
 } State_t;
 
 enum FreeRTOS_State_Priority {
