@@ -1,0 +1,169 @@
+SWV ITM Data Console - ITM Port: 0
+Starting WiFi Server Task
+Running HTML Server test
+WIFI START
+ES-WIFI Initialized.
+> eS-WiFi module MAC Address : C4:7F:51:92:93:52
+
+Connecting to MyWiFiSSID , MyWiFiPassword
+> es-wifi module connected: got IP Address : 192.168.1.79
+Server is running and waiting for an HTTP  Client connection to 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60490
+get 383 byte from server
+GET / HTTP/1.1
+Host: 192.168.1.79
+Upgrade-Insecure-Requests: 1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60491
+get 350 byte from server
+GET /raise-hand?stationNumber=7 HTTP/1.1
+Host: 192.168.1.79
+Connection: keep-alive
+Accept: */*
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Referer: http://192.168.1.79/
+Accept-Encoding: gzip, deflate
+
+flate
+Connection: keep-alive
+
+Station #: 7
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60492
+get 383 byte from server
+GET / HTTP/1.1
+Host: 192.168.1.79
+Upgrade-Insecure-Requests: 1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60495
+get 350 byte from server
+GET /raise-hand?stationNumber=5 HTTP/1.1
+Host: 192.168.1.79
+Connection: keep-alive
+Accept: */*
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Referer: http://192.168.1.79/
+Accept-Encoding: gzip, deflate
+
+flate
+Connection: keep-alive
+
+Station #: 5
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60496
+get 383 byte from server
+GET / HTTP/1.1
+Host: 192.168.1.79
+Upgrade-Insecure-Requests: 1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Removed Station #7 from queue.
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60497
+get 383 byte from server
+GET / HTTP/1.1
+Host: 192.168.1.79
+Upgrade-Insecure-Requests: 1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Removed Station #5 from queue.
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Client connected 192.168.1.41:60498
+get 383 byte from server
+GET / HTTP/1.1
+Host: 192.168.1.79
+Upgrade-Insecure-Requests: 1
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1
+Accept-Language: en-US,en;q=0.9
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+
+Webpage Sent!
+Send page after  GET command
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79
+Waiting communication at 192.168.1.79

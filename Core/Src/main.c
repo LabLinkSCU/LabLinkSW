@@ -61,23 +61,18 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
 /* Definitions for defaultTask */
-//osThreadId_t defaultTaskHandle;
-//const osThreadAttr_t defaultTask_attributes = {
-//  .name = "defaultTask",
-//  .stack_size = 128 * 4,
-//  .priority = (osPriority_t) osPriorityNormal,
-//};
 /* USER CODE BEGIN PV */
 //WiFi
 static uint8_t http[1024];
 static uint8_t IP_Addr[4];
-static int LedState = 0;
 // General
-volatile State_t SW_State = WEBSERVER; // State machine state
+volatile State_t SW_State = INIT; // State machine state
 QueueHandle_t xQueue; // Queue for hands :D
-//// CLIENT
-TaskHandle_t SETUP_Handle, USR_BTN_Handle, MainTask_Handle;
-SemaphoreHandle_t xSemaphore;
+// CLIENT
+TaskHandle_t SM_Handle, USR_BTN_Handle, MainTask_Handle;
+SemaphoreHandle_t xSemaphore_BTN; // Flag for deferred task
+SemaphoreHandle_t xSemaphore_State; // Flag for deferred task
+TimerHandle_t LEDTimer; // For when button is pressed
 
 // HOST
 /* @TODO */
@@ -98,7 +93,8 @@ void StartDefaultTask(void *argument);
 void USR_BTN(void *argument);
 void LED_BLINK(void *argument);
 void PING(void *argument);
-void SYS_Setup(void *argument);
+void System_SM(void *argument);
+void LEDTimer_Callback(TimerHandle_t xTimer);
 
 #if defined (TERMINAL_USE)
 #ifdef __GNUC__
@@ -118,9 +114,6 @@ static bool WebServerProcess(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#define SSID ""
-#define PASSWORD ""
-#define PORT 80
 #define TERMINAL_USE
 #define WIFI_WRITE_TIMEOUT 10000
 #define WIFI_READ_TIMEOUT 10000
@@ -179,8 +172,7 @@ int main(void)
   MX_QUADSPI_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-//  HAL_TIM_Base_Start_IT(&htim7);
-//  BSP_TSENSOR_Init();
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -191,17 +183,19 @@ int main(void)
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-  xSemaphore = xSemaphoreCreateBinary();
+  xSemaphore_BTN = xSemaphoreCreateBinary();
+  xSemaphore_State = xSemaphoreCreateMutex();
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
+  LEDTimer = xTimerCreate("LED Timer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0, LEDTimer_Callback);
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
-  xQueue = xQueueCreate(MAX_USERS, sizeof(int));
+  xQueue = xQueueCreate(MAX_USERS, sizeof(int)); // Number of users can be adjusted in LabLinkConf.h
 //  if(xQueue == NULL)
 //  {
 //	  Error_Handler();
@@ -219,12 +213,13 @@ int main(void)
     if (xReturned != pdPASS)
           vTaskDelete(USR_BTN_Handle);
 
-  xReturned = xTaskCreate(StartDefaultTask, "Main Task", 1024, NULL, PRIORITY_LOW, &MainTask_Handle);
+  xReturned = xTaskCreate(StartDefaultTask, "Main Task", 1024, NULL, PRIORITY_MED, &MainTask_Handle);
   if (xReturned != pdPASS)
           vTaskDelete(MainTask_Handle);
 
-//  xReturned = xTaskCreate(LED_BLINK, "LED_BLINK", 256, NULL, PRIORITY_MED, &USR_BTN_Handle);
-
+  xReturned = xTaskCreate(System_SM, "State Machine", 256, NULL, PRIORITY_MED, &SM_Handle);
+  if (xReturned != pdPASS)
+          vTaskDelete(USR_BTN_Handle);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -447,11 +442,15 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 36639;
+  htim7.Init.Prescaler = 3679;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 65501;
+  htim7.Init.Period = 65216;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_OnePulse_Init(&htim7, TIM_OPMODE_SINGLE) != HAL_OK)
   {
     Error_Handler();
   }
@@ -750,6 +749,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// This helper function allows us to read who is next in the Queue to SendWebPage function
 void getNextStation(xQueueHandle xQueue, char *output)
 {
 	int item;
@@ -762,7 +762,6 @@ void getNextStation(xQueueHandle xQueue, char *output)
       // Queue is empty
 		strcpy(output, "Queue Empty");
 	}
-	printf("%s", tmpStr);
 }
 
 
@@ -813,6 +812,7 @@ int wifi_connect(void)
                IP_Addr[1],
                IP_Addr[2],
                IP_Addr[3]));
+      xTaskNotifyGive(SM_Handle);
     }
     else
     {
@@ -880,6 +880,7 @@ int wifi_server(void)
 static bool WebServerProcess(void)
 {
   uint16_t  respLen;
+  char next_station[64];
   static   uint8_t resp[1024];
   bool    stopserver=false;
 
@@ -889,17 +890,14 @@ static bool WebServerProcess(void)
 
    if( respLen > 0)
    {
-	  char next_station[64];
-	  getNextStation(xQueue, next_station);
       if(strstr((char *)resp, "GET")) /* GET: put web page */
       {
+    	  getNextStation(xQueue, next_station);
     	  printf("%s", resp);
-    	  LOG(("GET REQUEST\n"));
-
     	  if(strstr((char *)resp, "stationNumber"))
     	  {
     		  char ss[20];
-    		  strncpy(ss, resp + 30, 1);
+    		  strncpy(ss, resp + 30, 1); // Extract the right station number from the web request
     		  ss[1] = '\0';
     		  printf("Station #: %s\n", ss);
     		  int stationID = atoi(ss);
@@ -908,8 +906,6 @@ static bool WebServerProcess(void)
     			  printf("Failed to add to queue. Queue full..\n");
     		  }
     	  }
-//        temp = (int) BSP_TSENSOR_ReadTemp();
-//        humidity = BSP_HSENSOR_ReadHumidity();
         if(SendWebPage(next_station) != WIFI_STATUS_OK)
         {
           LOG(("> ERROR : Cannot send web page\n"));
@@ -945,41 +941,39 @@ static bool WebServerProcess(void)
 static WIFI_Status_t SendWebPage(char* nextStation)
 {
   uint16_t SentDataLength;
-//  char* nextSt[64];
   WIFI_Status_t ret;
 
-  /* construct web page content */
   strcpy((char *)http, (char *)"HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nPragma: no-cache\r\n\r\n");
   strcat((char *)http, (char *)"<html>\r\n<body>\r\n");
   strcat((char *)http, (char *)"<title>SCU LabLink</title>\r\n");
   strcat((char *)http, (char *)"<h2>Lab Link - Lab Assistant</h2>\r\n");
   strcat((char *)http, (char *)"<br /><hr>\r\n");
 
-  // Create the form with a script to send the station number as part of the URL
+  // Shows the next group in the queue
   strcat((char *)http, (char *)"<h3>Next Group</h3>\r\n");
   strcat((char *)http, (char *)"<p>");
   strcat((char *)http, (char *)nextStation);
   strcat((char *)http, (char *)"</p>\r\n");
 
   strcat((char *)http, (char *)"<h3>Ask for Help</h3>\r\n");
-  strcat((char *)http, (char *)"<form id=\"helpForm\">\r\n"); // Removed action and method
-  strcat((char *)http, (char *)"<strong>Lab Station #: <input id=\"stationNumber\" name=\"stationNumber\" type=\"number\" value=\"\">\r\n"); // Keep name for JS
+  strcat((char *)http, (char *)"<form id=\"helpForm\">\r\n");
+  strcat((char *)http, (char *)"<strong>Lab Station #: <input id=\"stationNumber\" name=\"stationNumber\" type=\"number\" value=\"\">\r\n");
   strcat((char *)http, (char *)"</strong></p>\r\n");
-  strcat((char *)http, (char *)"<p><button type=\"button\" onclick=\"submitForm()\">Raise Hand</button></p>\r\n"); // Use JavaScript to submit
+  strcat((char *)http, (char *)"<p><button type=\"button\" onclick=\"submitForm()\">Raise Hand</button></p>\r\n");
   strcat((char *)http, (char *)"</form>\r\n");
 
-  // Add JavaScript for handling form submission and sending the station number in the URL
+  // Add JS for graceful form submission. Put Station ID in URL so the server can read it
   strcat((char *)http, (char *)"<script>\r\n");
   strcat((char *)http, (char *)"function submitForm() {\r\n");
   strcat((char *)http, (char *)"  var number = document.getElementById('stationNumber').value;\r\n");
-  strcat((char *)http, (char *)"  if (!number || isNaN(number)) {\r\n"); // Check if input is empty or not a number
+  strcat((char *)http, (char *)"  if (!number || isNaN(number)) {\r\n");
   strcat((char *)http, (char *)"    alert('Please enter a valid station number.');\r\n");
-  strcat((char *)http, (char *)"    return;\r\n"); // Don't proceed if invalid
+  strcat((char *)http, (char *)"    return;\r\n");
   strcat((char *)http, (char *)"  }\r\n");
 
   strcat((char *)http, (char *)"  var xhr = new XMLHttpRequest();\r\n");
-  strcat((char *)http, (char *)"  var url = '/raise-hand?stationNumber=' + encodeURIComponent(number);\r\n"); // Build URL with station number
-  strcat((char *)http, (char *)"  xhr.open('GET', url, true);\r\n"); // Use GET method to send the data
+  strcat((char *)http, (char *)"  var url = '/raise-hand?stationNumber=' + encodeURIComponent(number);\r\n");
+  strcat((char *)http, (char *)"  xhr.open('GET', url, true);\r\n");
   strcat((char *)http, (char *)"  xhr.onreadystatechange = function() {\r\n");
   strcat((char *)http, (char *)"    if (xhr.readyState == 4 && xhr.status == 200) {\r\n");
   strcat((char *)http, (char *)"      alert('Hand raised successfully!');\r\n");
@@ -991,10 +985,6 @@ static WIFI_Status_t SendWebPage(char* nextStation)
   strcat((char *)http, (char *)"</script>\r\n");
 
   strcat((char *)http, (char *)"</body>\r\n</html>\r\n");
-
-
-
-
 
   LOG(("Webpage Sent!\n"));
 
@@ -1008,75 +998,86 @@ static WIFI_Status_t SendWebPage(char* nextStation)
   return ret;
 }
 
-//void SYS_Setup()
-//{
-//	for(;;)
-//	{
-//		if(SW_State == INIT_SEARCH)
-//		{
-//			printf("System Startup\n");
-//			HAL_TIM_Base_Start_IT(&htim7);
-//			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-//			vTaskDelay(pdMS_TO_TICKS(2000));
-//			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-//			vTaskDelete(SETUP_Handle);
-//		}
-//	}
-//
-//}
+void System_SM(void *argument)
+{
+	for(;;)
+	{
+		State_t Next_State;
+		switch(SW_State)
+		{
+		case INIT:
+			// Initial state waits for WiFi connection before proceeding. Determined by flag
+			ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+			Next_State = CONNECTED;
+		case CONNECTED:
+			// Turn on LED when WiFi is connected
+			HAL_GPIO_WritePin(GPIOB, LED2_Pin, GPIO_PIN_SET);
+			Next_State = QUEUE_EMPTY;
+		break;
+		case QUEUE_EMPTY:
+			// Check if the queue is full to update state
+			if(uxQueueMessagesWaiting(xQueue) > 0) {
+				Next_State = QUEUE_VALUES;
+			}
+		case QUEUE_VALUES:
+			// Check if the queue is empty to update state
+			if(uxQueueMessagesWaiting(xQueue) == 0) {
+				Next_State = QUEUE_EMPTY;
+			}
+		break;
+		}
+
+		if(Next_State != SW_State)
+		{
+			// State is a shared global so we must protect the resource
+			if(xSemaphoreTake(xSemaphore_State, portMAX_DELAY) == pdTRUE)
+			{
+				SW_State = Next_State;
+				xSemaphoreGive(xSemaphore_State);
+			}
+		}
+	}
+}
 
 void USR_BTN(void *argument)
 {
 	for(;;)
 	{
-//		xTaskNotifyWait(0, 0, &notificationValue, portMAX_DELAY);
-//		if(notificationValue > 0)
-//		{
-		if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE)
+		if (xSemaphoreTake(xSemaphore_BTN, portMAX_DELAY) == pdTRUE) // Only fire when ISR triggers
 		{
-			int data;
-			xQueueReceive(xQueue, &data, 20);
-//			printf("Hello world! %x\n", ulNotifiedValue);
-
+			if(xSemaphoreTake(xSemaphore_State, portMAX_DELAY) == pdTRUE) // State is a shared global so we must protect the resource
+			{
+				if(SW_State == QUEUE_VALUES)
+				{
+					int data;
+					xQueueReceive(xQueue, &data, 20);
+					printf("Removed Station #%d from queue.\n", data);
+					HAL_GPIO_WritePin(GPIOB, LED2_Pin, GPIO_PIN_RESET);
+					xTimerStart(LEDTimer, 0);
+					xSemaphoreGive(xSemaphore_State); // Give back state control
+				}
+			}
 		}
 	}
 }
 
-void LED_BLINK(void *argument)
+void LEDTimer_Callback(TimerHandle_t xTimer)
 {
-	for(;;)
-		{
-			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
-			vTaskDelay(pdMS_TO_TICKS(500));
-		}
+	HAL_GPIO_WritePin(GPIOB, LED2_Pin, GPIO_PIN_SET); // After configured 2 seconds turn LED on
 }
-
-void PING(void *argument)
-{
-	for(;;)
-		{
-			printf("PING!\n");
-		}
-}
+//void LED_BLINK(void *argument)
+//{
+//	for(;;)
+//		{
+//			HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
+//			vTaskDelay(pdMS_TO_TICKS(500));
+//		}
+//}
 
 void SPI3_IRQHandler(void)
 {
   HAL_SPI_IRQHandler(&hspi);
 }
-
-//void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-//{
-//	if(GPIO_Pin == GPIO_PIN_13)
-//	{
-//		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-//		xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
-//
-//		// If giving the semaphore wakes a task with higher priority, perform a context switch
-//		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-//	}
-//
-//
-//}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -1089,10 +1090,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
     case (GPIO_PIN_13):
 	{
-//    	printf("USER BUTTON!\n");
+      // Trigger Deferred process task to run
       BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-      xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
-      // If giving the semaphore wakes a task with higher priority, perform a context switch
+      xSemaphoreGiveFromISR(xSemaphore_BTN, &xHigherPriorityTaskWoken);
       portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	  break;
 	}
@@ -1117,21 +1117,10 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-//	  State_t Next_State;
-//	  switch(SW_State)
-//	  {
-//	  case WEBSERVER:
-		  LOG(("Starting WiFi Server Task"));
-		  wifi_server();
-		  vTaskDelay(pdMS_TO_TICKS(1000));
-//		  break;
-//	  default:
-//		  break;
-//      if(Next_State != SW_State)
-//      {
-//	    SW_State = Next_State;
-//	  }
-//	 }
+	  // Handle wifi server code per ECEN 501 project instructions
+	  LOG(("Starting WiFi Server Task"));
+	  wifi_server();
+	  vTaskDelay(pdMS_TO_TICKS(1000));
   }
   /* USER CODE END 5 */
 }
@@ -1155,7 +1144,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 1 */
   if(htim->Instance == TIM7)
   {
-	  printf("Test");
+//	  HAL_GPIO_TogglePin(GPIOB, LED2_Pin);
   }
   /* USER CODE END Callback 1 */
 }

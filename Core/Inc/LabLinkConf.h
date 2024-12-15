@@ -1,9 +1,15 @@
 // Configuration Parameters
 #define MAX_USERS 31
+#define SSID ""
+#define PASSWORD ""
+#define PORT 80
 
 // States for State Machine
 typedef enum SM_States {
-	WEBSERVER = 0,
+	INIT = 0,
+	CONNECTED,
+	QUEUE_EMPTY,
+	QUEUE_VALUES
 } State_t;
 
 enum FreeRTOS_State_Priority {
@@ -12,6 +18,3 @@ enum FreeRTOS_State_Priority {
 	PRIORITY_MED,
 	PRIORITY_HIGH
 };
-
-typedef uint8_t Hand;
-
